@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dynamic Quiz with OpenTDB</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(135deg, #fde1ff 0%, #a6c1ee 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .quiz-container {
+      max-width: 650px;
+      width: 100%;
+      background: white;
+      border-radius: 18px;
+      box-shadow: 0 7px 32px rgba(2,44,85,0.15);
+      padding: 32px 30px;
+      animation: popIn 0.6s ease forwards;
+      box-sizing: border-box;
+    }
+    @keyframes popIn {
+      0% {transform: scale(0.92);}
+      60% {transform: scale(1.06);}
+      100% {transform: scale(1);}
+    }
+    .question {
+      font-size: 22px;
+      font-weight: 600;
+      color: #394867;
+      margin-bottom: 22px;
+      min-height: 72px;
+    }
+    .options button {
+      width: 100%;
+      background: linear-gradient(90deg, #a6c1ee 0%, #fbc2eb 100%);
+      border: none;
+      border-radius: 12px;
+      padding: 13px;
+      margin: 12px 0;
+      font-size: 17px;
+      font-weight: 500;
+      color: #283e54;
+      cursor: pointer;
+      box-shadow: 0 2px 10px #ccc5;
+      transition: background 0.25s, box-shadow 0.18s, transform 0.18s;
+    }
+    .options button.correct {
+      background: #74e39d !important;
+      animation: confetti 0.8s;
+      color: #295d27;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button.wrong {
+      background: #ff8b7d !important;
+      animation: shake 0.45s;
+      color: #8b2525;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button:hover:not(.correct):not(.wrong) {
+      background: #fbc2eb;
+      color: #5533be;
+      transform: scale(1.02);
+    }
+    @keyframes confetti {
+      0% { box-shadow: 0 0 #fff; }
+      70% { box-shadow: 0 0 24px 12px #fff53399; }
+      100% { box-shadow: 0 0 #fff; }
+    }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-2px); }
+      20%, 80% { transform: translateX(3px); }
+      30%, 50%, 70% { transform: translateX(-5px); }
+      40%, 60% { transform: translateX(5px); }
+    }
+    .streak-bonus {
+      text-align: center;
+      font-size: 21px;
+      color: #c0392b;
+      font-weight: 700;
+      margin: 12px 0 20px;
+      animation: pop 0.7s ease forwards;
+      min-height: 28px;
+    }
+    @keyframes pop {
+      0% { transform: scale(0); }
+      85% { transform: scale(1.22); }
+      100% { transform: scale(1); }
+    }
+    .stats {
+      text-align: center;
+      font-size: 16px;
+      color: #49586c;
+      margin-bottom: 18px;
+      user-select: none;
+    }
+    .result {
+      text-align: center;
+      color: #17b978;
+      font-weight: 700;
+      font-size: 23px;
+      margin: 30px 0 10px 0;
+      min-height: 56px;
+    }
+    .restart-btn {
+      display: block;
+      margin: 25px auto 0 auto;
+      font-weight: 700;
+      font-size: 17px;
+      background: linear-gradient(90deg, #fad961 0%, #f76b1c 100%);
+      border: none;
+      border-radius: 13px;
+      padding: 11px 27px;
+      color: white;
+      box-shadow: 0 3px 12px #ffcb7d91;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .restart-btn:hover {
+      background: #e46d20;
+    }
+    .source-label {
+      font-size: 14px;
+      font-style: italic;
+      color: #777;
+      margin-top: 3px;
+      text-align: right;
+      user-select: none;
+    }
+    @media (max-width: 700px) {
+      .quiz-container {
+        padding: 8vw 6vw;
+      }
+      .question {
+        font-size: 6vw;
+        min-height: auto;
+      }
+      .result {
+        font-size: 7vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="quiz-container" role="main" aria-live="polite">
+    <div class="question" id="question">Loading questions...</div>
+    <div class="source-label" id="qsource"></div>
+    <div class="options" id="options"></div>
+    <div class="streak-bonus" id="streakBonus"></div>
+    <div class="stats" aria-label="Quiz stats">
+      🌟 Score: <span id="score">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      🔥 Streak: <span id="streak">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      Q: <span id="qnum">0</span>/<span id="total">0</span>
+    </div>
+    <div class="result" id="result" aria-live="assertive"></div>
+    <button class="restart-btn" id="restartBtn" style="display:none;">Restart Quiz</button>
+
+    <!-- Sound effects -->
+    <audio id="correctSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/10/16/audio_124b27e6e2.mp3"></audio>
+    <audio id="wrongSound" preload="auto" src="https://cdn.pixabay.com/audio/2023/06/25/audio_9b7962702f.mp3"></audio>
+    <audio id="bonusSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/07/26/audio_112d8e3d8e.mp3"></audio>
+    <audio id="applauseSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/11/16/audio_12b653791c.mp3"></audio>
+  </div>
+
+<script>
+  // Utility: decode HTML entities (OpenTDB returns encoded entities)
+  function decodeHTML(html) {
+    const txt = document.createElement('textarea');
+    txt.innerHTML = html;
+    return txt.value;
+  }
+
+  // Fisher-Yates shuffle for array
+  function shuffle(array) {
+    for(let i = array.length -1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  const questionCount = 10;    // Number of questions to fetch from API
+  // Category 17 = Science & Nature; you can change category param in the URL
+  const apiURL = `https://opentdb.com/api.php?amount=${questionCount}&category=17&type=multiple`;
+
+  let questions = [];
+  let score = 0;
+  let streak = 0;
+  let qIndex = 0;
+  let maxStreak = 0;
+
+  const qEl = document.getElementById('question');
+  const optionsEl = document.getElementById('options');
+  const scoreEl = document.getElementById('score');
+  const streakEl = document.getElementById('streak');
+  const qnumEl = document.getElementById('qnum');
+  const totalEl = document.getElementById('total');
+  const resultEl = document.getElementById('result');
+  const streakBonusEl = document.getElementById('streakBonus');
+  const restartBtn = document.getElementById('restartBtn');
+  const qsourceEl = document.getElementById('qsource');
+
+  const soundCorrect = document.getElementById('correctSound');
+  const soundWrong = document.getElementById('wrongSound');
+  const soundBonus = document.getElementById('bonusSound');
+  const soundApplause = document.getElementById('applauseSound');
+
+  function play(sound) {
+    sound.currentTime = 0;
+    sound.play();
+  }
+
+  // Fetch questions from OpenTDB and start quiz
+  async function fetchQuestions() {
+    try {
+      const response = await fetch(apiURL);
+      const data = await response.json();
+
+      if (data.response_code !== 0) {
+        throw new Error("API returned no questions");
+      }
+
+      // Map to our quiz format
+      questions = data.results.map(q => {
+        const options = shuffle([
+          ...q.incorrect_answers.map(decodeHTML),
+          decodeHTML(q.correct_answer)
+        ]);
+        return {
+          question: decodeHTML(q.question),
+          options,
+          answer: options.indexOf(decodeHTML(q.correct_answer)),
+          source: 'OpenTDB Science & Nature'
+        };
+      });
+
+      totalEl.textContent = questions.length;
+      restartBtn.style.display = 'none';
+      resultEl.style.display = 'none';
+      score = 0;
+      streak = 0;
+      maxStreak = 0;
+      qIndex = 0;
+      scoreEl.textContent = score;
+      streakEl.textContent = streak;
+      qnumEl.textContent = qIndex + 1;
+      streakBonusEl.textContent = '';
+      loadQuestion();
+
+    } catch (error) {
+      qEl.textContent = 'Failed to load questions. Please try again later.';
+      optionsEl.innerHTML = '';
+      console.error('Error loading questions:', error);
+    }
+  }
+
+  function loadQuestion() {
+    const q = questions[qIndex];
+    qEl.textContent = q.question;
+    qsourceEl.textContent = '📖 ' + q.source;
+
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+
+    q.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.textContent = opt;
+      btn.addEventListener('click', () => checkAnswer(i, btn));
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  function checkAnswer(selectedIdx, btnClicked) {
+    // Disable all options to prevent multiple clicks
+    Array.from(optionsEl.children).forEach(btn => btn.disabled = true);
+
+    const correctIdx = questions[qIndex].answer;
+    const optionsBtns = Array.from(optionsEl.children);
+
+    if (selectedIdx === correctIdx) {
+      play(soundCorrect);
+      btnClicked.classList.add('correct');
+      score++;
+      streak++;
+      if (streak > maxStreak) maxStreak = streak;
+
+      if(streak > 0 && streak % 5 === 0) {
+        // Award streak bonus points
+        score += 3;
+        streakBonusEl.textContent = '🔥 Streak Bonus! +3 Points';
+        play(soundBonus);
+      } else {
+        streakBonusEl.textContent = '';
+      }
+    } else {
+      play(soundWrong);
+      btnClicked.classList.add('wrong');
+      streakBonusEl.textContent = '';
+      streak = 0;
+      // Highlight correct answer
+      optionsBtns[correctIdx].classList.add('correct');
+    }
+
+    scoreEl.textContent = score;
+    streakEl.textContent = streak;
+
+    // After delay, load next question or finish
+    setTimeout(() => {
+      qIndex++;
+      if(qIndex >= questions.length) {
+        showResult();
+      } else {
+        qnumEl.textContent = qIndex + 1;
+        loadQuestion();
+      }
+    }, 1000);
+  }
+
+  function showResult() {
+    play(soundApplause);
+    qEl.textContent = 'Quiz Complete!';
+    qsourceEl.textContent = '';
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+    resultEl.textContent = `🏆 You scored ${score} points.\n🔥 Best streak: ${maxStreak}`;
+    resultEl.style.whiteSpace = 'pre-line';
+    resultEl.style.display = 'block';
+    restartBtn.style.display = 'block';
+    qnumEl.textContent = questions.length;
+  }
+
+  restartBtn.addEventListener('click', fetchQuestions);
+
+  // Initial fetch on page load
+  window.onload = fetchQuestions;
+</script>
+</body>
+      </html>
+      <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dynamic Quiz with OpenTDB</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(135deg, #fde1ff 0%, #a6c1ee 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .quiz-container {
+      max-width: 650px;
+      width: 100%;
+      background: white;
+      border-radius: 18px;
+      box-shadow: 0 7px 32px rgba(2,44,85,0.15);
+      padding: 32px 30px;
+      animation: popIn 0.6s ease forwards;
+      box-sizing: border-box;
+    }
+    @keyframes popIn {
+      0% {transform: scale(0.92);}
+      60% {transform: scale(1.06);}
+      100% {transform: scale(1);}
+    }
+    .question {
+      font-size: 22px;
+      font-weight: 600;
+      color: #394867;
+      margin-bottom: 22px;
+      min-height: 72px;
+    }
+    .options button {
+      width: 100%;
+      background: linear-gradient(90deg, #a6c1ee 0%, #fbc2eb 100%);
+      border: none;
+      border-radius: 12px;
+      padding: 13px;
+      margin: 12px 0;
+      font-size: 17px;
+      font-weight: 500;
+      color: #283e54;
+      cursor: pointer;
+      box-shadow: 0 2px 10px #ccc5;
+      transition: background 0.25s, box-shadow 0.18s, transform 0.18s;
+    }
+    .options button.correct {
+      background: #74e39d !important;
+      animation: confetti 0.8s;
+      color: #295d27;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button.wrong {
+      background: #ff8b7d !important;
+      animation: shake 0.45s;
+      color: #8b2525;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button:hover:not(.correct):not(.wrong) {
+      background: #fbc2eb;
+      color: #5533be;
+      transform: scale(1.02);
+    }
+    @keyframes confetti {
+      0% { box-shadow: 0 0 #fff; }
+      70% { box-shadow: 0 0 24px 12px #fff53399; }
+      100% { box-shadow: 0 0 #fff; }
+    }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-2px); }
+      20%, 80% { transform: translateX(3px); }
+      30%, 50%, 70% { transform: translateX(-5px); }
+      40%, 60% { transform: translateX(5px); }
+    }
+    .streak-bonus {
+      text-align: center;
+      font-size: 21px;
+      color: #c0392b;
+      font-weight: 700;
+      margin: 12px 0 20px;
+      animation: pop 0.7s ease forwards;
+      min-height: 28px;
+    }
+    @keyframes pop {
+      0% { transform: scale(0); }
+      85% { transform: scale(1.22); }
+      100% { transform: scale(1); }
+    }
+    .stats {
+      text-align: center;
+      font-size: 16px;
+      color: #49586c;
+      margin-bottom: 18px;
+      user-select: none;
+    }
+    .result {
+      text-align: center;
+      color: #17b978;
+      font-weight: 700;
+      font-size: 23px;
+      margin: 30px 0 10px 0;
+      min-height: 56px;
+    }
+    .restart-btn {
+      display: block;
+      margin: 25px auto 0 auto;
+      font-weight: 700;
+      font-size: 17px;
+      background: linear-gradient(90deg, #fad961 0%, #f76b1c 100%);
+      border: none;
+      border-radius: 13px;
+      padding: 11px 27px;
+      color: white;
+      box-shadow: 0 3px 12px #ffcb7d91;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .restart-btn:hover {
+      background: #e46d20;
+    }
+    .source-label {
+      font-size: 14px;
+      font-style: italic;
+      color: #777;
+      margin-top: 3px;
+      text-align: right;
+      user-select: none;
+    }
+    @media (max-width: 700px) {
+      .quiz-container {
+        padding: 8vw 6vw;
+      }
+      .question {
+        font-size: 6vw;
+        min-height: auto;
+      }
+      .result {
+        font-size: 7vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="quiz-container" role="main" aria-live="polite">
+    <div class="question" id="question">Loading questions...</div>
+    <div class="source-label" id="qsource"></div>
+    <div class="options" id="options"></div>
+    <div class="streak-bonus" id="streakBonus"></div>
+    <div class="stats" aria-label="Quiz stats">
+      🌟 Score: <span id="score">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      🔥 Streak: <span id="streak">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      Q: <span id="qnum">0</span>/<span id="total">0</span>
+    </div>
+    <div class="result" id="result" aria-live="assertive"></div>
+    <button class="restart-btn" id="restartBtn" style="display:none;">Restart Quiz</button>
+
+    <!-- Sound effects -->
+    <audio id="correctSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/10/16/audio_124b27e6e2.mp3"></audio>
+    <audio id="wrongSound" preload="auto" src="https://cdn.pixabay.com/audio/2023/06/25/audio_9b7962702f.mp3"></audio>
+    <audio id="bonusSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/07/26/audio_112d8e3d8e.mp3"></audio>
+    <audio id="applauseSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/11/16/audio_12b653791c.mp3"></audio>
+  </div>
+
+<script>
+  // Utility: decode HTML entities (OpenTDB returns encoded entities)
+  function decodeHTML(html) {
+    const txt = document.createElement('textarea');
+    txt.innerHTML = html;
+    return txt.value;
+  }
+
+  // Fisher-Yates shuffle for array
+  function shuffle(array) {
+    for(let i = array.length -1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  const questionCount = 10;    // Number of questions to fetch from API
+  // Category 17 = Science & Nature; you can change category param in the URL
+  const apiURL = `https://opentdb.com/api.php?amount=${questionCount}&category=17&type=multiple`;
+
+  let questions = [];
+  let score = 0;
+  let streak = 0;
+  let qIndex = 0;
+  let maxStreak = 0;
+
+  const qEl = document.getElementById('question');
+  const optionsEl = document.getElementById('options');
+  const scoreEl = document.getElementById('score');
+  const streakEl = document.getElementById('streak');
+  const qnumEl = document.getElementById('qnum');
+  const totalEl = document.getElementById('total');
+  const resultEl = document.getElementById('result');
+  const streakBonusEl = document.getElementById('streakBonus');
+  const restartBtn = document.getElementById('restartBtn');
+  const qsourceEl = document.getElementById('qsource');
+
+  const soundCorrect = document.getElementById('correctSound');
+  const soundWrong = document.getElementById('wrongSound');
+  const soundBonus = document.getElementById('bonusSound');
+  const soundApplause = document.getElementById('applauseSound');
+
+  function play(sound) {
+    sound.currentTime = 0;
+    sound.play();
+  }
+
+  // Fetch questions from OpenTDB and start quiz
+  async function fetchQuestions() {
+    try {
+      const response = await fetch(apiURL);
+      const data = await response.json();
+
+      if (data.response_code !== 0) {
+        throw new Error("API returned no questions");
+      }
+
+      // Map to our quiz format
+      questions = data.results.map(q => {
+        const options = shuffle([
+          ...q.incorrect_answers.map(decodeHTML),
+          decodeHTML(q.correct_answer)
+        ]);
+        return {
+          question: decodeHTML(q.question),
+          options,
+          answer: options.indexOf(decodeHTML(q.correct_answer)),
+          source: 'OpenTDB Science & Nature'
+        };
+      });
+
+      totalEl.textContent = questions.length;
+      restartBtn.style.display = 'none';
+      resultEl.style.display = 'none';
+      score = 0;
+      streak = 0;
+      maxStreak = 0;
+      qIndex = 0;
+      scoreEl.textContent = score;
+      streakEl.textContent = streak;
+      qnumEl.textContent = qIndex + 1;
+      streakBonusEl.textContent = '';
+      loadQuestion();
+
+    } catch (error) {
+      qEl.textContent = 'Failed to load questions. Please try again later.';
+      optionsEl.innerHTML = '';
+      console.error('Error loading questions:', error);
+    }
+  }
+
+  function loadQuestion() {
+    const q = questions[qIndex];
+    qEl.textContent = q.question;
+    qsourceEl.textContent = '📖 ' + q.source;
+
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+
+    q.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.textContent = opt;
+      btn.addEventListener('click', () => checkAnswer(i, btn));
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  function checkAnswer(selectedIdx, btnClicked) {
+    // Disable all options to prevent multiple clicks
+    Array.from(optionsEl.children).forEach(btn => btn.disabled = true);
+
+    const correctIdx = questions[qIndex].answer;
+    const optionsBtns = Array.from(optionsEl.children);
+
+    if (selectedIdx === correctIdx) {
+      play(soundCorrect);
+      btnClicked.classList.add('correct');
+      score++;
+      streak++;
+      if (streak > maxStreak) maxStreak = streak;
+
+      if(streak > 0 && streak % 5 === 0) {
+        // Award streak bonus points
+        score += 3;
+        streakBonusEl.textContent = '🔥 Streak Bonus! +3 Points';
+        play(soundBonus);
+      } else {
+        streakBonusEl.textContent = '';
+      }
+    } else {
+      play(soundWrong);
+      btnClicked.classList.add('wrong');
+      streakBonusEl.textContent = '';
+      streak = 0;
+      // Highlight correct answer
+      optionsBtns[correctIdx].classList.add('correct');
+    }
+
+    scoreEl.textContent = score;
+    streakEl.textContent = streak;
+
+    // After delay, load next question or finish
+    setTimeout(() => {
+      qIndex++;
+      if(qIndex >= questions.length) {
+        showResult();
+      } else {
+        qnumEl.textContent = qIndex + 1;
+        loadQuestion();
+      }
+    }, 1000);
+  }
+
+  function showResult() {
+    play(soundApplause);
+    qEl.textContent = 'Quiz Complete!';
+    qsourceEl.textContent = '';
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+    resultEl.textContent = `🏆 You scored ${score} points.\n🔥 Best streak: ${maxStreak}`;
+    resultEl.style.whiteSpace = 'pre-line';
+    resultEl.style.display = 'block';
+    restartBtn.style.display = 'block';
+    qnumEl.textContent = questions.length;
+  }
+
+  restartBtn.addEventListener('click', fetchQuestions);
+
+  // Initial fetch on page load
+  window.onload = fetchQuestions;
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dynamic Quiz with OpenTDB</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(135deg, #fde1ff 0%, #a6c1ee 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .quiz-container {
+      max-width: 650px;
+      width: 100%;
+      background: white;
+      border-radius: 18px;
+      box-shadow: 0 7px 32px rgba(2,44,85,0.15);
+      padding: 32px 30px;
+      animation: popIn 0.6s ease forwards;
+      box-sizing: border-box;
+    }
+    @keyframes popIn {
+      0% {transform: scale(0.92);}
+      60% {transform: scale(1.06);}
+      100% {transform: scale(1);}
+    }
+    .question {
+      font-size: 22px;
+      font-weight: 600;
+      color: #394867;
+      margin-bottom: 22px;
+      min-height: 72px;
+    }
+    .options button {
+      width: 100%;
+      background: linear-gradient(90deg, #a6c1ee 0%, #fbc2eb 100%);
+      border: none;
+      border-radius: 12px;
+      padding: 13px;
+      margin: 12px 0;
+      font-size: 17px;
+      font-weight: 500;
+      color: #283e54;
+      cursor: pointer;
+      box-shadow: 0 2px 10px #ccc5;
+      transition: background 0.25s, box-shadow 0.18s, transform 0.18s;
+    }
+    .options button.correct {
+      background: #74e39d !important;
+      animation: confetti 0.8s;
+      color: #295d27;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button.wrong {
+      background: #ff8b7d !important;
+      animation: shake 0.45s;
+      color: #8b2525;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button:hover:not(.correct):not(.wrong) {
+      background: #fbc2eb;
+      color: #5533be;
+      transform: scale(1.02);
+    }
+    @keyframes confetti {
+      0% { box-shadow: 0 0 #fff; }
+      70% { box-shadow: 0 0 24px 12px #fff53399; }
+      100% { box-shadow: 0 0 #fff; }
+    }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-2px); }
+      20%, 80% { transform: translateX(3px); }
+      30%, 50%, 70% { transform: translateX(-5px); }
+      40%, 60% { transform: translateX(5px); }
+    }
+    .streak-bonus {
+      text-align: center;
+      font-size: 21px;
+      color: #c0392b;
+      font-weight: 700;
+      margin: 12px 0 20px;
+      animation: pop 0.7s ease forwards;
+      min-height: 28px;
+    }
+    @keyframes pop {
+      0% { transform: scale(0); }
+      85% { transform: scale(1.22); }
+      100% { transform: scale(1); }
+    }
+    .stats {
+      text-align: center;
+      font-size: 16px;
+      color: #49586c;
+      margin-bottom: 18px;
+      user-select: none;
+    }
+    .result {
+      text-align: center;
+      color: #17b978;
+      font-weight: 700;
+      font-size: 23px;
+      margin: 30px 0 10px 0;
+      min-height: 56px;
+    }
+    .restart-btn {
+      display: block;
+      margin: 25px auto 0 auto;
+      font-weight: 700;
+      font-size: 17px;
+      background: linear-gradient(90deg, #fad961 0%, #f76b1c 100%);
+      border: none;
+      border-radius: 13px;
+      padding: 11px 27px;
+      color: white;
+      box-shadow: 0 3px 12px #ffcb7d91;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .restart-btn:hover {
+      background: #e46d20;
+    }
+    .source-label {
+      font-size: 14px;
+      font-style: italic;
+      color: #777;
+      margin-top: 3px;
+      text-align: right;
+      user-select: none;
+    }
+    @media (max-width: 700px) {
+      .quiz-container {
+        padding: 8vw 6vw;
+      }
+      .question {
+        font-size: 6vw;
+        min-height: auto;
+      }
+      .result {
+        font-size: 7vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="quiz-container" role="main" aria-live="polite">
+    <div class="question" id="question">Loading questions...</div>
+    <div class="source-label" id="qsource"></div>
+    <div class="options" id="options"></div>
+    <div class="streak-bonus" id="streakBonus"></div>
+    <div class="stats" aria-label="Quiz stats">
+      🌟 Score: <span id="score">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      🔥 Streak: <span id="streak">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      Q: <span id="qnum">0</span>/<span id="total">0</span>
+    </div>
+    <div class="result" id="result" aria-live="assertive"></div>
+    <button class="restart-btn" id="restartBtn" style="display:none;">Restart Quiz</button>
+
+    <!-- Sound effects -->
+    <audio id="correctSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/10/16/audio_124b27e6e2.mp3"></audio>
+    <audio id="wrongSound" preload="auto" src="https://cdn.pixabay.com/audio/2023/06/25/audio_9b7962702f.mp3"></audio>
+    <audio id="bonusSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/07/26/audio_112d8e3d8e.mp3"></audio>
+    <audio id="applauseSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/11/16/audio_12b653791c.mp3"></audio>
+  </div>
+
+<script>
+  // Utility: decode HTML entities (OpenTDB returns encoded entities)
+  function decodeHTML(html) {
+    const txt = document.createElement('textarea');
+    txt.innerHTML = html;
+    return txt.value;
+  }
+
+  // Fisher-Yates shuffle for array
+  function shuffle(array) {
+    for(let i = array.length -1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  const questionCount = 10;    // Number of questions to fetch from API
+  // Category 17 = Science & Nature; you can change category param in the URL
+  const apiURL = `https://opentdb.com/api.php?amount=${questionCount}&category=17&type=multiple`;
+
+  let questions = [];
+  let score = 0;
+  let streak = 0;
+  let qIndex = 0;
+  let maxStreak = 0;
+
+  const qEl = document.getElementById('question');
+  const optionsEl = document.getElementById('options');
+  const scoreEl = document.getElementById('score');
+  const streakEl = document.getElementById('streak');
+  const qnumEl = document.getElementById('qnum');
+  const totalEl = document.getElementById('total');
+  const resultEl = document.getElementById('result');
+  const streakBonusEl = document.getElementById('streakBonus');
+  const restartBtn = document.getElementById('restartBtn');
+  const qsourceEl = document.getElementById('qsource');
+
+  const soundCorrect = document.getElementById('correctSound');
+  const soundWrong = document.getElementById('wrongSound');
+  const soundBonus = document.getElementById('bonusSound');
+  const soundApplause = document.getElementById('applauseSound');
+
+  function play(sound) {
+    sound.currentTime = 0;
+    sound.play();
+  }
+
+  // Fetch questions from OpenTDB and start quiz
+  async function fetchQuestions() {
+    try {
+      const response = await fetch(apiURL);
+      const data = await response.json();
+
+      if (data.response_code !== 0) {
+        throw new Error("API returned no questions");
+      }
+
+      // Map to our quiz format
+      questions = data.results.map(q => {
+        const options = shuffle([
+          ...q.incorrect_answers.map(decodeHTML),
+          decodeHTML(q.correct_answer)
+        ]);
+        return {
+          question: decodeHTML(q.question),
+          options,
+          answer: options.indexOf(decodeHTML(q.correct_answer)),
+          source: 'OpenTDB Science & Nature'
+        };
+      });
+
+      totalEl.textContent = questions.length;
+      restartBtn.style.display = 'none';
+      resultEl.style.display = 'none';
+      score = 0;
+      streak = 0;
+      maxStreak = 0;
+      qIndex = 0;
+      scoreEl.textContent = score;
+      streakEl.textContent = streak;
+      qnumEl.textContent = qIndex + 1;
+      streakBonusEl.textContent = '';
+      loadQuestion();
+
+    } catch (error) {
+      qEl.textContent = 'Failed to load questions. Please try again later.';
+      optionsEl.innerHTML = '';
+      console.error('Error loading questions:', error);
+    }
+  }
+
+  function loadQuestion() {
+    const q = questions[qIndex];
+    qEl.textContent = q.question;
+    qsourceEl.textContent = '📖 ' + q.source;
+
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+
+    q.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.textContent = opt;
+      btn.addEventListener('click', () => checkAnswer(i, btn));
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  function checkAnswer(selectedIdx, btnClicked) {
+    // Disable all options to prevent multiple clicks
+    Array.from(optionsEl.children).forEach(btn => btn.disabled = true);
+
+    const correctIdx = questions[qIndex].answer;
+    const optionsBtns = Array.from(optionsEl.children);
+
+    if (selectedIdx === correctIdx) {
+      play(soundCorrect);
+      btnClicked.classList.add('correct');
+      score++;
+      streak++;
+      if (streak > maxStreak) maxStreak = streak;
+
+      if(streak > 0 && streak % 5 === 0) {
+        // Award streak bonus points
+        score += 3;
+        streakBonusEl.textContent = '🔥 Streak Bonus! +3 Points';
+        play(soundBonus);
+      } else {
+        streakBonusEl.textContent = '';
+      }
+    } else {
+      play(soundWrong);
+      btnClicked.classList.add('wrong');
+      streakBonusEl.textContent = '';
+      streak = 0;
+      // Highlight correct answer
+      optionsBtns[correctIdx].classList.add('correct');
+    }
+
+    scoreEl.textContent = score;
+    streakEl.textContent = streak;
+
+    // After delay, load next question or finish
+    setTimeout(() => {
+      qIndex++;
+      if(qIndex >= questions.length) {
+        showResult();
+      } else {
+        qnumEl.textContent = qIndex + 1;
+        loadQuestion();
+      }
+    }, 1000);
+  }
+
+  function showResult() {
+    play(soundApplause);
+    qEl.textContent = 'Quiz Complete!';
+    qsourceEl.textContent = '';
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+    resultEl.textContent = `🏆 You scored ${score} points.\n🔥 Best streak: ${maxStreak}`;
+    resultEl.style.whiteSpace = 'pre-line';
+    resultEl.style.display = 'block';
+    restartBtn.style.display = 'block';
+    qnumEl.textContent = questions.length;
+  }
+
+  restartBtn.addEventListener('click', fetchQuestions);
+
+  // Initial fetch on page load
+  window.onload = fetchQuestions;
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dynamic Quiz with OpenTDB</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(135deg, #fde1ff 0%, #a6c1ee 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .quiz-container {
+      max-width: 650px;
+      width: 100%;
+      background: white;
+      border-radius: 18px;
+      box-shadow: 0 7px 32px rgba(2,44,85,0.15);
+      padding: 32px 30px;
+      animation: popIn 0.6s ease forwards;
+      box-sizing: border-box;
+    }
+    @keyframes popIn {
+      0% {transform: scale(0.92);}
+      60% {transform: scale(1.06);}
+      100% {transform: scale(1);}
+    }
+    .question {
+      font-size: 22px;
+      font-weight: 600;
+      color: #394867;
+      margin-bottom: 22px;
+      min-height: 72px;
+    }
+    .options button {
+      width: 100%;
+      background: linear-gradient(90deg, #a6c1ee 0%, #fbc2eb 100%);
+      border: none;
+      border-radius: 12px;
+      padding: 13px;
+      margin: 12px 0;
+      font-size: 17px;
+      font-weight: 500;
+      color: #283e54;
+      cursor: pointer;
+      box-shadow: 0 2px 10px #ccc5;
+      transition: background 0.25s, box-shadow 0.18s, transform 0.18s;
+    }
+    .options button.correct {
+      background: #74e39d !important;
+      animation: confetti 0.8s;
+      color: #295d27;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button.wrong {
+      background: #ff8b7d !important;
+      animation: shake 0.45s;
+      color: #8b2525;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .options button:hover:not(.correct):not(.wrong) {
+      background: #fbc2eb;
+      color: #5533be;
+      transform: scale(1.02);
+    }
+    @keyframes confetti {
+      0% { box-shadow: 0 0 #fff; }
+      70% { box-shadow: 0 0 24px 12px #fff53399; }
+      100% { box-shadow: 0 0 #fff; }
+    }
+    @keyframes shake {
+      10%, 90% { transform: translateX(-2px); }
+      20%, 80% { transform: translateX(3px); }
+      30%, 50%, 70% { transform: translateX(-5px); }
+      40%, 60% { transform: translateX(5px); }
+    }
+    .streak-bonus {
+      text-align: center;
+      font-size: 21px;
+      color: #c0392b;
+      font-weight: 700;
+      margin: 12px 0 20px;
+      animation: pop 0.7s ease forwards;
+      min-height: 28px;
+    }
+    @keyframes pop {
+      0% { transform: scale(0); }
+      85% { transform: scale(1.22); }
+      100% { transform: scale(1); }
+    }
+    .stats {
+      text-align: center;
+      font-size: 16px;
+      color: #49586c;
+      margin-bottom: 18px;
+      user-select: none;
+    }
+    .result {
+      text-align: center;
+      color: #17b978;
+      font-weight: 700;
+      font-size: 23px;
+      margin: 30px 0 10px 0;
+      min-height: 56px;
+    }
+    .restart-btn {
+      display: block;
+      margin: 25px auto 0 auto;
+      font-weight: 700;
+      font-size: 17px;
+      background: linear-gradient(90deg, #fad961 0%, #f76b1c 100%);
+      border: none;
+      border-radius: 13px;
+      padding: 11px 27px;
+      color: white;
+      box-shadow: 0 3px 12px #ffcb7d91;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .restart-btn:hover {
+      background: #e46d20;
+    }
+    .source-label {
+      font-size: 14px;
+      font-style: italic;
+      color: #777;
+      margin-top: 3px;
+      text-align: right;
+      user-select: none;
+    }
+    @media (max-width: 700px) {
+      .quiz-container {
+        padding: 8vw 6vw;
+      }
+      .question {
+        font-size: 6vw;
+        min-height: auto;
+      }
+      .result {
+        font-size: 7vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="quiz-container" role="main" aria-live="polite">
+    <div class="question" id="question">Loading questions...</div>
+    <div class="source-label" id="qsource"></div>
+    <div class="options" id="options"></div>
+    <div class="streak-bonus" id="streakBonus"></div>
+    <div class="stats" aria-label="Quiz stats">
+      🌟 Score: <span id="score">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      🔥 Streak: <span id="streak">0</span> &nbsp;&nbsp;|&nbsp;&nbsp;
+      Q: <span id="qnum">0</span>/<span id="total">0</span>
+    </div>
+    <div class="result" id="result" aria-live="assertive"></div>
+    <button class="restart-btn" id="restartBtn" style="display:none;">Restart Quiz</button>
+
+    <!-- Sound effects -->
+    <audio id="correctSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/10/16/audio_124b27e6e2.mp3"></audio>
+    <audio id="wrongSound" preload="auto" src="https://cdn.pixabay.com/audio/2023/06/25/audio_9b7962702f.mp3"></audio>
+    <audio id="bonusSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/07/26/audio_112d8e3d8e.mp3"></audio>
+    <audio id="applauseSound" preload="auto" src="https://cdn.pixabay.com/audio/2022/11/16/audio_12b653791c.mp3"></audio>
+  </div>
+
+<script>
+  // Utility: decode HTML entities (OpenTDB returns encoded entities)
+  function decodeHTML(html) {
+    const txt = document.createElement('textarea');
+    txt.innerHTML = html;
+    return txt.value;
+  }
+
+  // Fisher-Yates shuffle for array
+  function shuffle(array) {
+    for(let i = array.length -1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+
+  const questionCount = 10;    // Number of questions to fetch from API
+  // Category 17 = Science & Nature; you can change category param in the URL
+  const apiURL = `https://opentdb.com/api.php?amount=${questionCount}&category=17&type=multiple`;
+
+  let questions = [];
+  let score = 0;
+  let streak = 0;
+  let qIndex = 0;
+  let maxStreak = 0;
+
+  const qEl = document.getElementById('question');
+  const optionsEl = document.getElementById('options');
+  const scoreEl = document.getElementById('score');
+  const streakEl = document.getElementById('streak');
+  const qnumEl = document.getElementById('qnum');
+  const totalEl = document.getElementById('total');
+  const resultEl = document.getElementById('result');
+  const streakBonusEl = document.getElementById('streakBonus');
+  const restartBtn = document.getElementById('restartBtn');
+  const qsourceEl = document.getElementById('qsource');
+
+  const soundCorrect = document.getElementById('correctSound');
+  const soundWrong = document.getElementById('wrongSound');
+  const soundBonus = document.getElementById('bonusSound');
+  const soundApplause = document.getElementById('applauseSound');
+
+  function play(sound) {
+    sound.currentTime = 0;
+    sound.play();
+  }
+
+  // Fetch questions from OpenTDB and start quiz
+  async function fetchQuestions() {
+    try {
+      const response = await fetch(apiURL);
+      const data = await response.json();
+
+      if (data.response_code !== 0) {
+        throw new Error("API returned no questions");
+      }
+
+      // Map to our quiz format
+      questions = data.results.map(q => {
+        const options = shuffle([
+          ...q.incorrect_answers.map(decodeHTML),
+          decodeHTML(q.correct_answer)
+        ]);
+        return {
+          question: decodeHTML(q.question),
+          options,
+          answer: options.indexOf(decodeHTML(q.correct_answer)),
+          source: 'OpenTDB Science & Nature'
+        };
+      });
+
+      totalEl.textContent = questions.length;
+      restartBtn.style.display = 'none';
+      resultEl.style.display = 'none';
+      score = 0;
+      streak = 0;
+      maxStreak = 0;
+      qIndex = 0;
+      scoreEl.textContent = score;
+      streakEl.textContent = streak;
+      qnumEl.textContent = qIndex + 1;
+      streakBonusEl.textContent = '';
+      loadQuestion();
+
+    } catch (error) {
+      qEl.textContent = 'Failed to load questions. Please try again later.';
+      optionsEl.innerHTML = '';
+      console.error('Error loading questions:', error);
+    }
+  }
+
+  function loadQuestion() {
+    const q = questions[qIndex];
+    qEl.textContent = q.question;
+    qsourceEl.textContent = '📖 ' + q.source;
+
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+
+    q.options.forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.textContent = opt;
+      btn.addEventListener('click', () => checkAnswer(i, btn));
+      optionsEl.appendChild(btn);
+    });
+  }
+
+  function checkAnswer(selectedIdx, btnClicked) {
+    // Disable all options to prevent multiple clicks
+    Array.from(optionsEl.children).forEach(btn => btn.disabled = true);
+
+    const correctIdx = questions[qIndex].answer;
+    const optionsBtns = Array.from(optionsEl.children);
+
+    if (selectedIdx === correctIdx) {
+      play(soundCorrect);
+      btnClicked.classList.add('correct');
+      score++;
+      streak++;
+      if (streak > maxStreak) maxStreak = streak;
+
+      if(streak > 0 && streak % 5 === 0) {
+        // Award streak bonus points
+        score += 3;
+        streakBonusEl.textContent = '🔥 Streak Bonus! +3 Points';
+        play(soundBonus);
+      } else {
+        streakBonusEl.textContent = '';
+      }
+    } else {
+      play(soundWrong);
+      btnClicked.classList.add('wrong');
+      streakBonusEl.textContent = '';
+      streak = 0;
+      // Highlight correct answer
+      optionsBtns[correctIdx].classList.add('correct');
+    }
+
+    scoreEl.textContent = score;
+    streakEl.textContent = streak;
+
+    // After delay, load next question or finish
+    setTimeout(() => {
+      qIndex++;
+      if(qIndex >= questions.length) {
+        showResult();
+      } else {
+        qnumEl.textContent = qIndex + 1;
+        loadQuestion();
+      }
+    }, 1000);
+  }
+
+  function showResult() {
+    play(soundApplause);
+    qEl.textContent = 'Quiz Complete!';
+    qsourceEl.textContent = '';
+    optionsEl.innerHTML = '';
+    streakBonusEl.textContent = '';
+    resultEl.textContent = `🏆 You scored ${score} points.\n🔥 Best streak: ${maxStreak}`;
+    resultEl.style.whiteSpace = 'pre-line';
+    resultEl.style.display = 'block';
+    restartBtn.style.display = 'block';
+    qnumEl.textContent = questions.length;
+  }
+
+  restartBtn.addEventListener('click', fetchQuestions);
+
+  // Initial fetch on page load
+  window.onload = fetchQuestions;
+</script>
+</body>
+</html>
